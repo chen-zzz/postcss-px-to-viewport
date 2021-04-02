@@ -25,7 +25,7 @@ var defaults = {
 var ignoreNextComment = 'px-to-viewport-ignore-next';
 var ignorePrevComment = 'px-to-viewport-ignore';
 
-module.exports = postcss.plugin('postcss-px-to-viewport', function (options) {
+function getOptVars (options) {
   var opts = objectAssign({}, defaults, options);
 
   checkRegExpOrArray(opts, 'exclude');
@@ -33,12 +33,58 @@ module.exports = postcss.plugin('postcss-px-to-viewport', function (options) {
 
   var pxRegex = getUnitRegexp(opts.unitToConvert);
   var satisfyPropList = createPropListMatcher(opts.propList);
+  return {
+    opts,
+    pxRegex,
+    satisfyPropList
+  }
+}
+
+function getOpts (options) {
+  if (!options.default && !options.multi) {
+    var opt = getOptVars(options)
+    return function () {
+      return opt
+    }
+  }
+  if (!options.multi) {
+    var opt = getOptVars(options.default)
+    return function () {
+      return opt
+    }
+  }
+  var defaultOpts = getOptVars(options.default)
+  var multiOpts = {}
+  var includes = Object.keys(options.multi)
+  includes.forEach(key => {
+    multiOpts[key] = getOptVars(options.multi[key])
+  })
+  return function (file) {
+    for (var regex of includes) {
+      if (new RegExp(regex).test(file)) {
+        return multiOpts[regex]
+      }
+    }
+    return defaultOpts
+  }
+}
+
+
+module.exports = postcss.plugin('@rouchi/postcss-px-to-viewport-multi', function (options) {
+  
+  var optsFn = getOpts(options)
+
   var landscapeRules = [];
 
   return function (css, result) {
     css.walkRules(function (rule) {
       // Add exclude option to ignore some files like 'node_modules'
       var file = rule.source && rule.source.input.file;
+      var variables = optsFn(file)
+      var opts = variables.opts
+      var pxRegex = variables.pxRegex
+      var satisfyPropList = variables.satisfyPropList
+
 
       if (opts.include && file) {
         if (Object.prototype.toString.call(opts.include) === '[object RegExp]') {
@@ -143,6 +189,7 @@ module.exports = postcss.plugin('postcss-px-to-viewport', function (options) {
     }
   };
 });
+
 
 function getUnit(prop, opts) {
   return prop.indexOf('font') === -1 ? opts.viewportUnit : opts.fontViewportUnit;
